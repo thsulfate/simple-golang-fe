@@ -80,7 +80,7 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 
 			endTime := time.Now().UnixNano()
 
-			diffTime := float64(endTime-startTime) / float64(time.Second) * 1000
+			diffTime := float64(endTime-startTime) / float64(time.Millisecond)
 			totalTime = totalTime + diffTime
 
 			var backendResp BackendResponse
