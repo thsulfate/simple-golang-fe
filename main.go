@@ -38,8 +38,6 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 	backend01 := "GoBackend01"
 	backend02 := "GoBackend02"
 
-	var totalTime int64 = 0
-
 	query := r.URL.Query()
 	countStr := query.Get("count")
 	if countStr == "" {
