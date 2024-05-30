@@ -64,7 +64,7 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			startTime := time.Now().UnixNano()
+			startTime := time.Now()
 			resp, err := http.Get(backendURL)
 			if err != nil {
 				fmt.Println("Error while calling backend:", err)
@@ -78,10 +78,10 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			endTime := time.Now().UnixNano()
+			endTime := time.Now()
 
-			diffTime := float64(endTime-startTime) / float64(time.Millisecond)
-			totalTime = totalTime + diffTime
+			diffTime := endTime.Sub(startTime).Milliseconds()
+			totalTime = totalTime + float64(diffTime)
 
 			var backendResp BackendResponse
 			err = json.Unmarshal(body, &backendResp)
@@ -94,7 +94,7 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 			responses = append(responses, BackendResponse{
 				UUID:     backendResp.UUID,
 				Hostname: backendResp.Hostname,
-				ExecTime: strconv.FormatFloat(diffTime, 'f', 4, 64) + " ms",
+				ExecTime: strconv.FormatFloat(float64(diffTime), 'f', 4, 64) + " ms",
 			})
 			if backendResp.Hostname == backend01 {
 				backend1Count++
