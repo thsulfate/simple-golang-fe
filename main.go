@@ -38,7 +38,7 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 	backend01 := "GoBackend01"
 	backend02 := "GoBackend02"
 
-	var totalTime float64 = 0
+	var totalTime int64 = 0
 
 	query := r.URL.Query()
 	countStr := query.Get("count")
@@ -81,7 +81,7 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 			endTime := time.Now()
 
 			diffTime := endTime.Sub(startTime).Milliseconds()
-			totalTime = totalTime + float64(diffTime)
+			totalTime = totalTime + diffTime
 
 			var backendResp BackendResponse
 			err = json.Unmarshal(body, &backendResp)
@@ -94,7 +94,7 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 			responses = append(responses, BackendResponse{
 				UUID:     backendResp.UUID,
 				Hostname: backendResp.Hostname,
-				ExecTime: strconv.FormatFloat(float64(diffTime), 'f', 4, 64) + " ms",
+				ExecTime: fmt.Sprintf("%d ms", diffTime),
 			})
 			if backendResp.Hostname == backend01 {
 				backend1Count++
@@ -117,7 +117,7 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 		Responses:     responses,
 		Backend1Count: backend1Count,
 		Backend2Count: backend2Count,
-		TotalTime:     strconv.FormatFloat(totalTime, 'f', 4, 64) + " ms",
+		TotalTime:     fmt.Sprintf("%d ms", totalTime),
 	}
 
 	jsonResponse, err := json.Marshal(aggregatedResponse)
