@@ -60,6 +60,8 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
+	totalStartTime := time.Now()
+
 	for i := 0; i < count; i++ {
 		wg.Add(1)
 		go func() {
@@ -80,9 +82,6 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 
 			endTime := time.Now()
 
-			diffTime := endTime.Sub(startTime).Milliseconds()
-			totalTime = totalTime + diffTime
-
 			var backendResp BackendResponse
 			err = json.Unmarshal(body, &backendResp)
 			if err != nil {
@@ -94,7 +93,7 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 			responses = append(responses, BackendResponse{
 				UUID:     backendResp.UUID,
 				Hostname: backendResp.Hostname,
-				ExecTime: fmt.Sprintf("%d ms", diffTime),
+				ExecTime: fmt.Sprintf("%d ms", endTime.Sub(startTime).Milliseconds()),
 			})
 			if backendResp.Hostname == backend01 {
 				backend1Count++
@@ -107,6 +106,8 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 
 	wg.Wait()
 
+	totalEndTime := time.Now()
+
 	// // Calculate time taken for each request
 	// for i := range responses {
 	// 	responses[i].StartTime = responses[i].StartTime / int64(time.Millisecond)
@@ -117,7 +118,7 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 		Responses:     responses,
 		Backend1Count: backend1Count,
 		Backend2Count: backend2Count,
-		TotalTime:     fmt.Sprintf("%d ms", totalTime),
+		TotalTime:     fmt.Sprintf("%d ms", totalEndTime.Sub(totalStartTime).Milliseconds()),
 	}
 
 	jsonResponse, err := json.Marshal(aggregatedResponse)
