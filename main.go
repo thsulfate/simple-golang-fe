@@ -13,9 +13,9 @@ import (
 
 // BackendResponse struct untuk menangani respons dari backend
 type BackendResponse struct {
-	UUID      string `json:"uuid"`
-	Hostname  string `json:"hostname"`
-	TotalTime string `json:"total_time"`
+	UUID     string `json:"uuid"`
+	Hostname string `json:"hostname"`
+	ExecTime string `json:"exec_time"`
 }
 
 // AggregatedResponse struct untuk respons dari client API
@@ -23,7 +23,7 @@ type AggregatedResponse struct {
 	Responses     []BackendResponse `json:"responses"`
 	Backend1Count int               `json:"backend1_count"`
 	Backend2Count int               `json:"backend2_count"`
-	TotalTime     float64           `json:"total_time"`
+	TotalTime     string            `json:"total_time"`
 }
 
 func main() {
@@ -92,9 +92,9 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 
 			mu.Lock()
 			responses = append(responses, BackendResponse{
-				UUID:      backendResp.UUID,
-				Hostname:  backendResp.Hostname,
-				TotalTime: strconv.FormatFloat(diffTime, 'f', 4, 64) + " ms",
+				UUID:     backendResp.UUID,
+				Hostname: backendResp.Hostname,
+				ExecTime: strconv.FormatFloat(diffTime, 'f', 4, 64) + " ms",
 			})
 			if backendResp.Hostname == backend01 {
 				backend1Count++
@@ -117,7 +117,7 @@ func aggregateHandler(w http.ResponseWriter, r *http.Request) {
 		Responses:     responses,
 		Backend1Count: backend1Count,
 		Backend2Count: backend2Count,
-		TotalTime:     totalTime,
+		TotalTime:     strconv.FormatFloat(totalTime, 'f', 4, 64) + " ms",
 	}
 
 	jsonResponse, err := json.Marshal(aggregatedResponse)
