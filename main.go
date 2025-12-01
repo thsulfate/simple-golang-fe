@@ -27,6 +27,7 @@ var (
 // PageData passed to templates
 type PageData struct {
 	BackendURL string
+	ClientIP   string
 }
 
 func main() {
@@ -47,7 +48,10 @@ func main() {
 
 	// Root handler
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		data := PageData{BackendURL: backend}
+		data := PageData{
+			BackendURL: backend,
+			ClientIP:   clientIP(r),
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		if err := tmpl.Execute(w, data); err != nil {
 			http.Error(w, "template error", http.StatusInternalServerError)
