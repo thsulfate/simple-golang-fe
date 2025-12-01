@@ -30,7 +30,7 @@
     btn.addEventListener('click', async () => {
       out.textContent = 'loading...';
       try {
-        const res = await fetch('/api/hello');
+        const res = await fetch('/api/uuid');
         if (!res.ok) {
           out.textContent = 'error: ' + res.status;
           return;
