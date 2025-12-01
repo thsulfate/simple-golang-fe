@@ -1,4 +1,3 @@
-```markdown
 Simple Go Frontend — minimal, tidy, Go-first
 
 Recommended minimal structure (tidy and easy to deploy)
@@ -34,6 +33,3 @@ Deployment tips for a frontend farm
 - Deploy this package to each frontend VM under /opt/simple-frontend and enable the systemd unit.
 - Put an external load balancer or edge reverse proxy in front of the frontends; use /healthz to probe instance health.
 - Keep BACKEND_URL pointing to an internal VIP, internal load balancer, or backend service discovery.
-
-If you want a single-file binary (no external templates/static), I can show how to embed assets using go:embed — but since you wanted separate files for tidiness, this layout keeps HTML and CSS editable on the server.
-```
