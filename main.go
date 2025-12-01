@@ -1,130 +1,214 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
+	"context"
+	"flag"
+	"html/template"
+	"io"
 	"log"
+	"net"
 	"net/http"
-	"strconv"
-	"sync"
+	"net/url"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 )
 
-// BackendResponse struct untuk menangani respons dari backend
-type BackendResponse struct {
-	UUID     string `json:"uuid"`
-	Hostname string `json:"hostname"`
-	ExecTime string `json:"exec_time"`
-}
+// Config via flags and env
+var (
+	addr      = flag.String("addr", ":"+getEnv("PORT", "8080"), "address to listen on")
+	assetsDir = flag.String("assets", getEnv("ASSETS_DIR", "./"), "path to assets directory (contains templates/ and static/)")
+	backend   = getEnv("BACKEND_URL", "")
+)
 
-// AggregatedResponse struct untuk respons dari client API
-type AggregatedResponse struct {
-	Responses     []BackendResponse `json:"responses"`
-	Backend1Count int               `json:"backend1_count"`
-	Backend2Count int               `json:"backend2_count"`
-	TotalTime     string            `json:"total_time"`
+// PageData passed to templates
+type PageData struct {
+	BackendURL string
 }
 
 func main() {
-	http.HandleFunc("/aggregate", aggregateHandler)
-	log.Println("Starting client API server on :8082")
-	if err := http.ListenAndServe(":8082", nil); err != nil {
-		log.Fatalf("Could not start server: %s\n", err.Error())
+	flag.Parse()
+
+	templatesPath := filepath.Join(*assetsDir, "templates", "index.html")
+	tmpl, err := template.ParseFiles(templatesPath)
+	if err != nil {
+		log.Fatalf("parse templates: %v (looked for %s)", err, templatesPath)
+	}
+
+	mux := http.NewServeMux()
+
+	// Serve static files from assetsDir/static at /static/
+	staticDir := filepath.Join(*assetsDir, "static")
+	fileServer := http.FileServer(http.Dir(staticDir))
+	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+
+	// Root handler
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		data := PageData{BackendURL: backend}
+		w.Header().Set("Cache-Control", "no-store")
+		if err := tmpl.Execute(w, data); err != nil {
+			http.Error(w, "template error", http.StatusInternalServerError)
+			log.Println("template execute:", err)
+		}
+	})
+
+	// Health check
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+
+	// Lightweight API proxy to backend to avoid CORS when running separate frontend and backend farms.
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		if backend == "" {
+			http.Error(w, "backend not configured", http.StatusBadGateway)
+			return
+		}
+		if !allowedMethod(r.Method) {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		u, err := url.Parse(backend)
+		if err != nil {
+			http.Error(w, "bad backend url", http.StatusInternalServerError)
+			log.Println("bad BACKEND_URL:", err)
+			return
+		}
+
+		// Build backend URL: backend + remainder after /api
+		relPath := strings.TrimPrefix(r.URL.Path, "/api")
+		backendPath := filepath.ToSlash(filepath.Join(u.Path, relPath))
+		target := url.URL{
+			Scheme:   u.Scheme,
+			Host:     u.Host,
+			Path:     backendPath,
+			RawQuery: r.URL.RawQuery,
+		}
+
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), r.Body)
+		if err != nil {
+			http.Error(w, "failed create request", http.StatusInternalServerError)
+			return
+		}
+		copyHeaders(r.Header, req.Header)
+		req.Header.Set("X-Forwarded-For", clientIP(r))
+
+		client := &http.Client{Timeout: 15 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			http.Error(w, "backend unavailable", http.StatusBadGateway)
+			log.Println("proxy error:", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		// propagate headers (excluding hop-by-hop)
+		for k, vv := range resp.Header {
+			for _, v := range vv {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+	})
+
+	server := &http.Server{
+		Addr:         *addr,
+		Handler:      loggingMiddleware(mux),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	// Start listener
+	log.Printf("starting frontend on %s, assets=%s, backend=%s", *addr, *assetsDir, backend)
+	ln, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		log.Fatalf("listen: %v", err)
+	}
+
+	// Graceful shutdown
+	idleConnsClosed := make(chan struct{})
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
+		<-c
+		log.Println("shutdown signal received")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("HTTP server Shutdown: %v", err)
+		}
+		close(idleConnsClosed)
+	}()
+
+	if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("serve: %v", err)
+	}
+
+	<-idleConnsClosed
+	log.Println("server stopped")
+}
+
+func allowedMethod(m string) bool {
+	switch m {
+	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete:
+		return true
+	default:
+		return false
 	}
 }
 
-func aggregateHandler(w http.ResponseWriter, r *http.Request) {
-	backend01 := "GoBackend01"
-	backend02 := "GoBackend02"
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := &statusResponseWriter{ResponseWriter: w, status: 200}
+		next.ServeHTTP(ww, r)
+		log.Printf("%s %s %d %s\n", r.Method, r.URL.Path, ww.status, time.Since(start))
+	})
+}
 
-	query := r.URL.Query()
-	countStr := query.Get("count")
-	if countStr == "" {
-		http.Error(w, "count parameter is required", http.StatusBadRequest)
-		return
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusResponseWriter) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func copyHeaders(from http.Header, to http.Header) {
+	for k, vv := range from {
+		switch strings.ToLower(k) {
+		case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade":
+			continue
+		}
+		for _, v := range vv {
+			to.Add(k, v)
+		}
 	}
+}
 
-	count, err := strconv.Atoi(countStr)
+func clientIP(r *http.Request) string {
+	if x := r.Header.Get("X-Forwarded-For"); x != "" {
+		parts := strings.Split(x, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		http.Error(w, "invalid count parameter", http.StatusBadRequest)
-		return
+		return r.RemoteAddr
 	}
+	return host
+}
 
-	backendURL := "http://localhost:8081/uuid"
-	var responses []BackendResponse
-	var backend1Count, backend2Count int
-
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-
-	totalStartTime := time.Now()
-
-	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			startTime := time.Now()
-			resp, err := http.Get(backendURL)
-			if err != nil {
-				fmt.Println("Error while calling backend:", err)
-				return
-			}
-			defer resp.Body.Close()
-
-			body, err := ioutil.ReadAll(resp.Body)
-			if err != nil {
-				fmt.Println("Error while reading response body:", err)
-				return
-			}
-
-			endTime := time.Now()
-
-			var backendResp BackendResponse
-			err = json.Unmarshal(body, &backendResp)
-			if err != nil {
-				fmt.Println("Error while unmarshalling JSON response:", err)
-				return
-			}
-
-			mu.Lock()
-			responses = append(responses, BackendResponse{
-				UUID:     backendResp.UUID,
-				Hostname: backendResp.Hostname,
-				ExecTime: fmt.Sprintf("%d ms", endTime.Sub(startTime).Milliseconds()),
-			})
-			if backendResp.Hostname == backend01 {
-				backend1Count++
-			} else if backendResp.Hostname == backend02 {
-				backend2Count++
-			}
-			mu.Unlock()
-		}()
+func getEnv(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
 	}
-
-	wg.Wait()
-
-	totalEndTime := time.Now()
-
-	// // Calculate time taken for each request
-	// for i := range responses {
-	// 	responses[i].StartTime = responses[i].StartTime / int64(time.Millisecond)
-	// 	responses[i].EndTime = responses[i].EndTime / int64(time.Millisecond)
-	// }
-
-	aggregatedResponse := AggregatedResponse{
-		Responses:     responses,
-		Backend1Count: backend1Count,
-		Backend2Count: backend2Count,
-		TotalTime:     fmt.Sprintf("%d ms", totalEndTime.Sub(totalStartTime).Milliseconds()),
-	}
-
-	jsonResponse, err := json.Marshal(aggregatedResponse)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonResponse)
+	return def
 }

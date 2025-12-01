@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simple Go Frontend</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Simple Go Frontend</h1>
+    <p class="muted">Minimal, tidy frontend served by a single Go binary.</p>
+
+    <section class="card">
+      <h2>Example API call</h2>
+      <p>Fetch a payload from the backend via the server proxy.</p>
+      <div>
+        <button id="fetchBtn">Fetch</button>
+      </div>
+      <pre id="output" class="output">no data fetched yet</pre>
+    </section>
+
+    <footer class="footer">Frontend farm — multiple instances behind a load balancer. Health: <code>/healthz</code></footer>
+  </main>
+
+  <script>
+    const btn = document.getElementById('fetchBtn');
+    const out = document.getElementById('output');
+
+    btn.addEventListener('click', async () => {
+      out.textContent = 'loading...';
+      try {
+        const res = await fetch('/api/hello');
+        if (!res.ok) {
+          out.textContent = 'error: ' + res.status;
+          return;
+        }
+        const text = await res.text();
+        out.textContent = text;
+      } catch (e) {
+        out.textContent = 'fetch failed: ' + e;
+      }
+    });
+  </script>
+</body>
+</html>
