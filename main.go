@@ -21,7 +21,7 @@ import (
 var (
 	addr      = flag.String("addr", ":"+getEnv("PORT", "8080"), "address to listen on")
 	assetsDir = flag.String("assets", getEnv("ASSETS_DIR", "./"), "path to assets directory (contains templates/ and static/)")
-	backend   = getEnv("BACKEND_URL", "")
+	backend   = getEnv("BACKEND_URL", "http://localhost:8081")
 )
 
 // PageData passed to templates
